@@ -22,7 +22,6 @@ const client = new Client({
 const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
 // Function to analyze image with Gemini - ไม่บันทึกไฟล์ลงโฟลเดอร์ temp
-// Function to analyze image with Gemini - ไม่บันทึกไฟล์ลงโฟลเดอร์ temp
 async function analyzeImageWithGemini(imageUrl) {
   try {
     console.log(`กำลังวิเคราะห์รูปภาพด้วย Gemini: ${imageUrl}`);
@@ -133,7 +132,6 @@ function extractItemNames(itemDropsText) {
 }
 
 
-// ฟังก์ชันส่งข้อมูล item drops ไปยัง LINE ในรูปแบบ Flex Message
 // ฟังก์ชันส่งข้อมูล item drops ไปยัง LINE ในรูปแบบ Flex Message
 async function sendItemDropsToLine(imageUrl, itemDropsText, author) {
   try {
@@ -289,17 +287,67 @@ async function sendItemDropsToLine(imageUrl, itemDropsText, author) {
   }
 }
 
+// สร้างฟังก์ชันสำหรับดึงข้อความล่าสุดจากช่องที่ระบุ
+async function fetchLatestMessages() {
+  try {
+    console.log('กำลังดึงข้อความล่าสุดจากช่อง Discord...');
+    const channel = await client.channels.fetch(SOURCE_CHANNEL_ID);
+    
+    if (!channel) {
+      console.error('ไม่พบช่องที่ระบุ');
+      return;
+    }
+    
+    // ดึงข้อความล่าสุด 10 ข้อความ
+    const messages = await channel.messages.fetch({ limit: 10 });
+    
+    // ตรวจสอบข้อความที่มีรูปภาพในช่วง 10 นาทีที่ผ่านมา
+    const tenMinutesAgo = Date.now() - 10 * 60 * 1000;
+    
+    for (const message of messages.values()) {
+      // ตรวจสอบเฉพาะข้อความใหม่ในช่วง 10 นาทีที่ผ่านมา
+      if (message.createdTimestamp > tenMinutesAgo && message.attachments.size > 0) {
+        for (const attachment of message.attachments.values()) {
+          if (attachment.contentType && attachment.contentType.startsWith('image/')) {
+            console.log(`ตรวจพบรูปภาพใหม่จาก ${message.author.username}: ${attachment.url}`);
+            
+            // วิเคราะห์รูปภาพด้วย Gemini
+            const itemDropsText = await analyzeImageWithGemini(attachment.url);
+            console.log('ผลการวิเคราะห์:', itemDropsText);
+            
+            // ส่งข้อมูลไปยัง LINE
+            await sendItemDropsToLine(attachment.url, itemDropsText, message.author.username);
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.error('เกิดข้อผิดพลาดในการดึงข้อความล่าสุด:', error);
+  }
+}
+
 // จัดการ unhandled rejections เพื่อป้องกันการล่มของแอพ
 process.on('unhandledRejection', (error) => {
   console.error('Unhandled Promise Rejection:', error);
 });
 
-client.on('ready', () => {
+// ส่ง heartbeat ทุก 5 นาทีเพื่อให้ Render ไม่หยุดการทำงาน
+setInterval(() => {
+  console.log(`[${new Date().toLocaleString('th-TH')}] Heartbeat - ระบบยังทำงานอยู่`);
+}, 5 * 60 * 1000);
+
+client.on('ready', async () => {
   console.log(`เข้าสู่ระบบในชื่อ ${client.user.tag}`);
   console.log('กำลังตรวจสอบรูปภาพใหม่จากช่อง Discord เพื่อวิเคราะห์ Item Drops...');
+  
+  // เริ่มต้นดึงข้อความล่าสุดทันทีที่บอทพร้อมทำงาน
+  await fetchLatestMessages();
+  
+  // ตั้งเวลาให้ดึงข้อความล่าสุดทุก 10 นาที
+  setInterval(fetchLatestMessages, 10 * 60 * 1000);
 });
 
-// ตรวจจับข้อความใหม่ (เฉพาะรูปภาพ)
+// ตรวจจับข้อความใหม่ (real-time)
 client.on('messageCreate', async message => {
   if (message.channelId === SOURCE_CHANNEL_ID) {
     // ส่งเฉพาะรูปภาพ
@@ -325,5 +373,25 @@ client.on('messageCreate', async message => {
   }
 });
 
+// เพิ่มการจัดการเมื่อบอทถูกตัดการเชื่อมต่อ
+client.on('disconnect', () => {
+  console.log('บอทถูกตัดการเชื่อมต่อ กำลังพยายามเชื่อมต่อใหม่...');
+});
+
 // เข้าสู่ระบบด้วย User Token
-client.login(USER_TOKEN);
+client.login(USER_TOKEN).catch(error => {
+  console.error('เกิดข้อผิดพลาดในการเข้าสู่ระบบ:', error);
+});
+
+// ตั้งค่า server เพื่อป้องกัน Render sleep
+const express = require('express');
+const app = express();
+const port = process.env.PORT || 3000;
+
+app.get('/', (req, res) => {
+  res.send('Discord Bot is running!');
+});
+
+app.listen(port, () => {
+  console.log(`Server running on port ${port}`);
+});
