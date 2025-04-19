@@ -529,7 +529,7 @@ function checkPendingQueue() {
        pendingImages[`${CHANNEL_IDS.SECOND_CHANNEL}_standard`] || 
        pendingImages[`${CHANNEL_IDS.SECOND_CHANNEL}_rateup`]) && 
       (now - pendingImages.lastUpdate >= WAIT_TIME)) {
-    console.log(`รอนานกว่า ${WAIT_TIME / 60000} นาทีแล้ว กำลังส่ง Carousel Flex Message ที่มีอยู่...`);
+    console.log(`รอนานกว่า ${WAIT_TIME / 180000} นาทีแล้ว กำลังส่ง Carousel Flex Message ที่มีอยู่...`);
     sendCarouselToLine();
   }
 }
@@ -538,7 +538,7 @@ function checkPendingQueue() {
 let lastBannerImageTimestamp = 0;
 async function processBannerImage(imageUrl, author, timestamp) {
   // ถ้าเป็นรูปแรกที่ได้รับหรือเวลาผ่านไปนานกว่า 1 นาที ถือว่าเป็นชุดใหม่
-  if (timestamp - lastBannerImageTimestamp > 60000) {
+  if (timestamp - lastBannerImageTimestamp > 180000) {
     // รีเซ็ตสถานะ Gacha Images
     pendingImages[`${CHANNEL_IDS.SECOND_CHANNEL}_standard`] = null;
     pendingImages[`${CHANNEL_IDS.SECOND_CHANNEL}_rateup`] = null;
