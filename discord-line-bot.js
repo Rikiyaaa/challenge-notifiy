@@ -19,6 +19,9 @@ const config = {
         '1362084541170192455': '1363789018327945276' // banner
     },
     
+    // ช่องปลายทางที่ต้องลบ @บทบาท-ที่ไม่รู้จัก
+    specialFilterChannels: ['1363789018327945276', '1363809293287293070'],
+    
     // ชื่อช่องเพื่อใช้ในการแสดงข้อความ log
     channelNames: {
         '1332169081314476063': 'challenge',
@@ -34,9 +37,8 @@ const config = {
     },
     
     // เพิ่ม ID role สำหรับคำสั่งพิเศษ
-    commandRoleId: '1363795020552994896', // บทบาทสำหรับคำสั่งทั่วไป
-    bannerRoleId: '1363794959786053702',  // บทบาทสำหรับ banner
-    challengeRoleId: '1363795020552994896' // บทบาทสำหรับ challenge
+    commandRoleId: '1363795020552994896',
+    challengeRoleId: '1363794959786053702'
 };
 
 // ฟังก์ชั่นสำหรับแปลง role mention
@@ -56,29 +58,38 @@ function removeUnknownRoleMentions(content) {
 }
 
 // ฟังก์ชั่นสำหรับตรวจสอบและจัดการคำสั่งพิเศษ
-function processSpecialCommands(content, channelId) {
+function processSpecialCommands(content, sourceChannelId, destinationChannelId) {
     let newContent = content;
     let hasCommand = false;
     
-    // ลบ @บทบาท-ที่ไม่รู้จัก
+    // ลบ @บทบาท-ที่ไม่รู้จัก ถ้าพบในข้อความและช่องปลายทางอยู่ใน specialFilterChannels
     if (newContent.includes('@บทบาท-ที่ไม่รู้จัก')) {
-        newContent = removeUnknownRoleMentions(newContent);
-        hasCommand = true;
-        console.log(`พบ @บทบาท-ที่ไม่รู้จัก ลบออกแล้ว`);
+        // ตรวจสอบว่าช่องปลายทางเป็นช่องที่ระบุให้ลบหรือไม่
+        if (config.specialFilterChannels.includes(destinationChannelId)) {
+            newContent = removeUnknownRoleMentions(newContent);
+            hasCommand = true;
+            console.log(`พบ @บทบาท-ที่ไม่รู้จัก ในช่อง ${destinationChannelId} ลบออกแล้ว`);
+        }
     }
     
-    // แก้ไขตรงนี้: ตรวจสอบคำสั่ง ?banner - ใช้ bannerRoleId เสมอ
+    // ตรวจสอบคำสั่ง ?banner
     if (newContent.includes('?banner')) {
-        newContent = newContent.replace(/\?banner/g, `<@&${config.bannerRoleId}>`);
+        // ถ้าอยู่ในห้อง challenge ให้ใช้ role ID พิเศษ
+        if (sourceChannelId === '1332169081314476063') {
+            newContent = newContent.replace(/\?banner/g, `<@&${config.challengeRoleId}>`);
+            console.log(`พบ ?banner ในห้อง challenge แทนที่ด้วย role ID ${config.challengeRoleId}`);
+        } else {
+            newContent = newContent.replace(/\?banner/g, `<@&${config.commandRoleId}>`);
+            console.log(`พบ ?banner แทนที่ด้วย role ID ${config.commandRoleId}`);
+        }
         hasCommand = true;
-        console.log(`พบ ?banner แทนที่ด้วย role ID ${config.bannerRoleId}`);
     }
     
-    // แก้ไขตรงนี้: ตรวจสอบคำสั่ง ?challenge - ใช้ challengeRoleId เสมอ
+    // ตรวจสอบคำสั่ง ?challenge
     if (newContent.includes('?challenge')) {
-        newContent = newContent.replace(/\?challenge/g, `<@&${config.challengeRoleId}>`);
+        newContent = newContent.replace(/\?challenge/g, `<@&${config.commandRoleId}>`);
         hasCommand = true;
-        console.log(`พบ ?challenge แทนที่ด้วย role ID ${config.challengeRoleId}`);
+        console.log(`พบ ?challenge แทนที่ด้วย role ID ${config.commandRoleId}`);
     }
     
     return {
@@ -96,9 +107,9 @@ async function transferMessage(message, destinationChannel) {
         // แปลง role mentions
         let content = message.content ? convertRoleMentions(message.content) : "";
         
-        // ตรวจสอบคำสั่งพิเศษ
+        // ตรวจสอบคำสั่งพิเศษ โดยส่ง ID ช่องต้นทางและปลายทาง
         if (content) {
-            const result = processSpecialCommands(content, message.channel.id);
+            const result = processSpecialCommands(content, message.channel.id, destinationChannel.id);
             content = result.content;
             
             if (result.hasCommand) {
@@ -159,7 +170,7 @@ async function transferMessage(message, destinationChannel) {
         
         // ตรวจสอบคำสั่งพิเศษในข้อความที่แปลง embeds ด้วย
         if (messageOptions.content) {
-            const result = processSpecialCommands(messageOptions.content, message.channel.id);
+            const result = processSpecialCommands(messageOptions.content, message.channel.id, destinationChannel.id);
             messageOptions.content = result.content;
         }
         
@@ -170,6 +181,30 @@ async function transferMessage(message, destinationChannel) {
     } catch (error) {
         console.error(`เกิดข้อผิดพลาดในการส่งข้อความ: ${error.message}`);
     }
+}
+
+// ฟังก์ชั่นเพิ่มเติมสำหรับตรวจสอบข้อความในช่องปลายทาง
+function checkDestinationMessage(message) {
+    // ตรวจสอบว่าเป็นข้อความในช่องปลายทางที่ต้องการตรวจสอบหรือไม่
+    if (message.guild && message.guild.id === config.destinationServerId && 
+        config.specialFilterChannels.includes(message.channel.id)) {
+        
+        // ถ้ามีข้อความ @บทบาท-ที่ไม่รู้จัก ให้ลบทันที
+        if (message.content && message.content.includes('@บทบาท-ที่ไม่รู้จัก')) {
+            try {
+                console.log(`พบ @บทบาท-ที่ไม่รู้จัก ในช่อง ${message.channel.id} กำลังลบข้อความ...`);
+                message.delete().then(() => {
+                    console.log(`ลบข้อความสำเร็จ!`);
+                }).catch(error => {
+                    console.error(`ไม่สามารถลบข้อความได้: ${error.message}`);
+                });
+            } catch (error) {
+                console.error(`เกิดข้อผิดพลาดในการลบข้อความ: ${error.message}`);
+            }
+            return true;
+        }
+    }
+    return false;
 }
 
 // ฟังก์ชั่นหลักที่จะทำงานเมื่อบอทพร้อมใช้งาน
@@ -184,13 +219,21 @@ client.on('ready', async () => {
     }
     
     console.log(`บอทจะจัดการคำสั่งพิเศษดังนี้:`);
-    console.log(`- ลบ @บทบาท-ที่ไม่รู้จัก ออกจากข้อความทั้งหมด`);
-    console.log(`- ถ้าเจอ ?banner จะแท็ก role ID ${config.bannerRoleId}`);
-    console.log(`- ถ้าเจอ ?challenge จะแท็ก role ID ${config.challengeRoleId}`);
+    console.log(`- ถ้าเจอ ?banner ในห้อง challenge จะแท็ก role ID ${config.challengeRoleId}`);
+    console.log(`- ถ้าเจอ ?banner ในห้องอื่นๆ หรือ ?challenge จะแท็ก role ID ${config.commandRoleId}`);
+    console.log(`- ลบ @บทบาท-ที่ไม่รู้จัก ออกจากข้อความในช่อง:`);
+    for (const channelId of config.specialFilterChannels) {
+        console.log(`  - ${channelId}`);
+    }
 });
 
 // คอยรับข้อความใหม่เท่านั้น
 client.on('messageCreate', async (message) => {
+    // ตรวจสอบข้อความในช่องปลายทางก่อน
+    if (checkDestinationMessage(message)) {
+        return; // ถ้ามีการจัดการข้อความในช่องปลายทางแล้ว ให้จบการทำงาน
+    }
+    
     // ตรวจสอบว่าเป็นข้อความจากช่องและเซิร์ฟเวอร์ที่ต้องการหรือไม่
     if (message.guild && message.guild.id === config.sourceServerId) {
         const destChannelId = config.channels[message.channel.id];
