@@ -34,8 +34,9 @@ const config = {
     },
     
     // เพิ่ม ID role สำหรับคำสั่งพิเศษ
-    commandRoleId: '1363795020552994896',
-    challengeRoleId: '1363794959786053702'
+    commandRoleId: '1363795020552994896', // บทบาทสำหรับคำสั่งทั่วไป
+    bannerRoleId: '1363794959786053702',  // บทบาทสำหรับ banner
+    challengeRoleId: '1363795020552994896' // บทบาทสำหรับ challenge
 };
 
 // ฟังก์ชั่นสำหรับแปลง role mention
@@ -66,24 +67,18 @@ function processSpecialCommands(content, channelId) {
         console.log(`พบ @บทบาท-ที่ไม่รู้จัก ลบออกแล้ว`);
     }
     
-    // ตรวจสอบคำสั่ง ?banner
+    // แก้ไขตรงนี้: ตรวจสอบคำสั่ง ?banner - ใช้ bannerRoleId เสมอ
     if (newContent.includes('?banner')) {
-        // ถ้าอยู่ในห้อง challenge ให้ใช้ role ID พิเศษ
-        if (channelId === '1332169081314476063') {
-            newContent = newContent.replace(/\?banner/g, `<@&${config.challengeRoleId}>`);
-            console.log(`พบ ?banner ในห้อง challenge แทนที่ด้วย role ID ${config.challengeRoleId}`);
-        } else {
-            newContent = newContent.replace(/\?banner/g, `<@&${config.commandRoleId}>`);
-            console.log(`พบ ?banner แทนที่ด้วย role ID ${config.commandRoleId}`);
-        }
+        newContent = newContent.replace(/\?banner/g, `<@&${config.bannerRoleId}>`);
         hasCommand = true;
+        console.log(`พบ ?banner แทนที่ด้วย role ID ${config.bannerRoleId}`);
     }
     
-    // ตรวจสอบคำสั่ง ?challenge
+    // แก้ไขตรงนี้: ตรวจสอบคำสั่ง ?challenge - ใช้ challengeRoleId เสมอ
     if (newContent.includes('?challenge')) {
-        newContent = newContent.replace(/\?challenge/g, `<@&${config.commandRoleId}>`);
+        newContent = newContent.replace(/\?challenge/g, `<@&${config.challengeRoleId}>`);
         hasCommand = true;
-        console.log(`พบ ?challenge แทนที่ด้วย role ID ${config.commandRoleId}`);
+        console.log(`พบ ?challenge แทนที่ด้วย role ID ${config.challengeRoleId}`);
     }
     
     return {
@@ -190,8 +185,8 @@ client.on('ready', async () => {
     
     console.log(`บอทจะจัดการคำสั่งพิเศษดังนี้:`);
     console.log(`- ลบ @บทบาท-ที่ไม่รู้จัก ออกจากข้อความทั้งหมด`);
-    console.log(`- ถ้าเจอ ?banner ในห้อง challenge จะแท็ก role ID ${config.challengeRoleId}`);
-    console.log(`- ถ้าเจอ ?banner ในห้องอื่นๆ หรือ ?challenge จะแท็ก role ID ${config.commandRoleId}`);
+    console.log(`- ถ้าเจอ ?banner จะแท็ก role ID ${config.bannerRoleId}`);
+    console.log(`- ถ้าเจอ ?challenge จะแท็ก role ID ${config.challengeRoleId}`);
 });
 
 // คอยรับข้อความใหม่เท่านั้น
