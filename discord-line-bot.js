@@ -31,7 +31,10 @@ const config = {
         '1363756435506200688': '1363794959786053702',
         '1363801882795184268': '1363795020552994896',
         // เพิ่ม role ID ตามต้องการ
-    }
+    },
+    
+    // เพิ่ม ID role สำหรับคำสั่งพิเศษ
+    commandRoleId: '1363795020552994896'
 };
 
 // ฟังก์ชั่นสำหรับแปลง role mention
@@ -45,6 +48,29 @@ function convertRoleMentions(content) {
     return content;
 }
 
+// ฟังก์ชั่นสำหรับตรวจสอบและจัดการคำสั่งพิเศษ
+function processSpecialCommands(content) {
+    let newContent = content;
+    let hasCommand = false;
+    
+    // ตรวจสอบคำสั่ง ?banner
+    if (newContent.includes('?banner')) {
+        newContent = newContent.replace(/\?banner/g, `<@&${config.commandRoleId}>`);
+        hasCommand = true;
+    }
+    
+    // ตรวจสอบคำสั่ง ?challenge
+    if (newContent.includes('?challenge')) {
+        newContent = newContent.replace(/\?challenge/g, `<@&${config.commandRoleId}>`);
+        hasCommand = true;
+    }
+    
+    return {
+        content: newContent,
+        hasCommand
+    };
+}
+
 // ฟังก์ชั่นสำหรับส่งต่อข้อความ
 async function transferMessage(message, destinationChannel) {
     try {
@@ -53,6 +79,16 @@ async function transferMessage(message, destinationChannel) {
         
         // แปลง role mentions
         let content = message.content ? convertRoleMentions(message.content) : "";
+        
+        // ตรวจสอบคำสั่งพิเศษ
+        if (content) {
+            const result = processSpecialCommands(content);
+            content = result.content;
+            
+            if (result.hasCommand) {
+                console.log(`พบคำสั่งพิเศษ แทนที่ด้วย role mention แล้ว`);
+            }
+        }
         
         // ถ้าไม่มีเนื้อหาหรือไฟล์แนบ ให้ข้าม
         if (!content && message.attachments.size === 0 && message.embeds.length === 0) {
@@ -105,6 +141,12 @@ async function transferMessage(message, destinationChannel) {
             }
         }
         
+        // ตรวจสอบคำสั่งพิเศษในข้อความที่แปลง embeds ด้วย
+        if (messageOptions.content) {
+            const result = processSpecialCommands(messageOptions.content);
+            messageOptions.content = result.content;
+        }
+        
         // ส่งข้อความไปยังช่องปลายทาง
         await destinationChannel.send(messageOptions);
         console.log(`ส่งข้อความสำเร็จ!`);
@@ -124,6 +166,8 @@ client.on('ready', async () => {
         const channelName = config.channelNames[sourceId] || sourceId;
         console.log(`- ติดตาม ${channelName} (${sourceId}) -> (${destId})`);
     }
+    
+    console.log(`บอทจะตรวจจับคำสั่ง ?banner และ ?challenge เพื่อเปลี่ยนเป็นการแท็ก <@&${config.commandRoleId}>`);
 });
 
 // คอยรับข้อความใหม่เท่านั้น
