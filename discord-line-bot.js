@@ -1,32 +1,29 @@
 const { Client } = require('discord.js-selfbot-v13');
 const axios = require('axios');
-const { GoogleGenAI } = require('@google/genai');
 const express = require('express');
 require('dotenv').config();
 
 // Configuration
 const USER_TOKEN = process.env.USER_TOKEN;
 const CHANNEL_IDS = {
-  FIRST_CHANNEL: '1362084541170192455', // Challenge channel
-  SECOND_CHANNEL: '1332169081314476063'  // Banner/Gacha channel
+  FIRST_CHANNEL: '1362084541170192455', // Challenge channel source
+  SECOND_CHANNEL: '1332169081314476063', // Banner/Gacha channel source
+  CHALLENGE_DESTINATION: '1363789061852233728', // Challenge destination channel
+  BANNER_DESTINATION: '1363789018327945276' // Banner destination channel
 };
 
-// LINE Configuration
-const LINE_TOKEN = process.env.LINE_TOKEN;
-const LINE_USER_ID = process.env.LINE_USER_ID;
-
-// Gemini Configuration
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+// Role IDs for pinging
+const ROLE_IDS = {
+  CHALLENGE_ROLE: '1363794959786053702',
+  BANNER_ROLE: '1363795020552994896'
+};
 
 // สร้าง Discord Client
 const client = new Client({
   checkUpdate: false
 });
 
-// Initialize Gemini
-const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-
-// รายการรอเพื่อสร้าง Carousel
+// รายการรอเพื่อส่งข้อความ
 const pendingImages = {
   [CHANNEL_IDS.FIRST_CHANNEL]: null, // Challenge image
   [`${CHANNEL_IDS.SECOND_CHANNEL}_standard`]: null, // Standard gacha
@@ -104,346 +101,58 @@ const sentImagesHistory = {
   }
 };
 
-// Function to analyze image with Gemini (only for challenge images)
-async function analyzeImageWithGemini(imageUrl) {
+// ฟังก์ชันส่งข้อความไปยัง Discord Channel
+async function sendToDiscordChannel(imageInfo, isChallenge) {
   try {
-    console.log(`กำลังวิเคราะห์รูปภาพด้วย Gemini: ${imageUrl}`);
-    
-    // ดาวน์โหลดรูปภาพเป็น buffer โดยตรงไม่บันทึกลงดิสก์
-    const imageResponse = await axios.get(imageUrl, { 
-      responseType: 'arraybuffer',
-      timeout: 30000 // เพิ่ม timeout เป็น 30 วินาที
-    });
-    
-    let imageBuffer = Buffer.from(imageResponse.data);
-    
-    // แปลง buffer เป็น base64
-    let base64Image = imageBuffer.toString('base64');
-    
-    // ส่งไปที่ Gemini สำหรับการวิเคราะห์โดยใช้โมเดล Vision
-    const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
-      contents: [
-        {
-          role: "user",
-          parts: [
-            { text: "ระบุ item drops ที่ปรากฏอยู่ในรูปภาพ กรุณาระบุชื่อของ item และจำนวนเเละเปอร์เซ็น แสดงข้อมูลในรูปแบบรายการที่เป็นระเบียบ ไม่ต้องพิมพ์ แน่นอน นี่คือรายการ item drops ที่ปรากฏในรูปภาพพิมพ์เเค่ข้อมูล item" },
-            { 
-              inlineData: {
-                mimeType: "image/jpeg",
-                data: base64Image
-              }
-            }
-          ]
-        }
-      ]
-    });
-    
-    // ทำความสะอาด buffer เพื่อให้ garbage collector ทำงาน
-    imageBuffer = null;
-    base64Image = null;
-    
-    return response.text;
-  } catch (error) {
-    console.error('เกิดข้อผิดพลาดในการวิเคราะห์รูปภาพด้วย Gemini:', error);
-    if (error.response) {
-      console.error('Response status:', error.response.status);
-      console.error('Response data:', error.response.data);
-    }
-    return "ไม่สามารถวิเคราะห์รูปภาพได้ เกิดข้อผิดพลาด";
-  }
-}
-
-// สกัดเฉพาะชื่อไอเทมออกจากข้อความ
-function extractItemNames(itemDropsText) {
-  // แยกข้อความเป็นบรรทัด
-  const lines = itemDropsText.split('\n');
-  
-  // อาร์เรย์เก็บชื่อไอเทม
-  const itemNames = [];
-  
-  // ประมวลผลแต่ละบรรทัด
-  for (const line of lines) {
-    // ข้ามบรรทัดว่าง
-    if (!line.trim()) continue;
-    
-    // ลบเครื่องหมาย * ที่อาจมีอยู่ที่จุดเริ่มต้นของบรรทัดและตัดช่องว่างทั้งหมด
-    let cleanLine = line.trim();
-    if (cleanLine.startsWith('*')) {
-      cleanLine = cleanLine.substring(1).trim();
+    // ตรวจสอบว่ามีรูปภาพที่รอส่งหรือไม่
+    if (!imageInfo) {
+      console.log(`ไม่มีรูปภาพ ${isChallenge ? 'Challenge' : 'Banner'} ที่รอส่ง`);
+      return;
     }
     
-    let itemName = "";
+    // เลือก Channel ปลายทาง
+    const destinationChannelId = isChallenge ? 
+      CHANNEL_IDS.CHALLENGE_DESTINATION : 
+      CHANNEL_IDS.BANNER_DESTINATION;
     
-    // กรณีที่มีวงเล็บ (x...) ให้ใช้ข้อความก่อนวงเล็บ
-    const parenIndex = cleanLine.indexOf('(');
-    if (parenIndex !== -1) {
-      itemName = cleanLine.substring(0, parenIndex).trim();
-    } 
-    // กรณีที่มี x ตามด้วยตัวเลข (เช่น x1-2, x3~5)
-    else if (cleanLine.includes('x') && /x\d/.test(cleanLine)) {
-      const xIndex = cleanLine.indexOf('x');
-      // ตรวจสอบว่า x ที่พบเป็น x ที่ตามด้วยตัวเลขหรือไม่
-      if (xIndex > 0 && /\d/.test(cleanLine[xIndex + 1])) {
-        itemName = cleanLine.substring(0, xIndex).trim();
-      } else {
-        // ถ้าไม่มีรูปแบบที่ชัดเจน ใช้ทั้งบรรทัด
-        itemName = cleanLine.trim();
-      }
+    const destinationChannel = client.channels.cache.get(destinationChannelId);
+    if (!destinationChannel) {
+      console.error(`ไม่พบช่องปลายทาง ${destinationChannelId}`);
+      return;
+    }
+    
+    // เลือก Role ที่จะปิง
+    const roleId = isChallenge ? ROLE_IDS.CHALLENGE_ROLE : ROLE_IDS.BANNER_ROLE;
+    
+    // สร้างข้อความพร้อมปิง Role
+    let messageContent = `<@&${roleId}> `;
+    
+    if (isChallenge) {
+      messageContent += `New Challenge from ${imageInfo.author}`;
     } else {
-      // ถ้าไม่พบรูปแบบใดๆ ลองแยกโดยเอาเฉพาะข้อความก่อนตัวเลขแรกหรือเครื่องหมาย
-      const match = cleanLine.match(/^(.*?)(?:\d|%|,)/);
-      if (match && match[1].trim()) {
-        itemName = match[1].trim();
-      } else {
-        // ถ้าไม่พบรูปแบบใดๆ เลย ใช้ทั้งบรรทัด
-        itemName = cleanLine.trim();
-      }
+      messageContent += `New ${imageInfo.isStandard ? 'Standard' : 'Rate-up'} Banner from ${imageInfo.author}`;
     }
     
-    // ตรวจสอบว่าได้ชื่อไอเทมหรือไม่ และเพิ่มเข้าอาร์เรย์
-    if (itemName) {
-      itemNames.push(itemName);
-    }
+    // ส่งข้อความพร้อมรูปภาพ
+    await destinationChannel.send({
+      content: messageContent,
+      files: [imageInfo.imageUrl]
+    });
+    
+    console.log(`ส่งรูปภาพ ${isChallenge ? 'Challenge' : 'Banner'} ไปยัง Discord Channel ${destinationChannelId} สำเร็จ`);
+    
+    // เพิ่มรูปภาพเข้าประวัติ
+    sentImagesHistory.addImage(imageInfo.imageUrl);
+    
+    return true;
+  } catch (error) {
+    console.error(`เกิดข้อผิดพลาดในการส่งข้อความไปยัง Discord Channel:`, error);
+    return false;
   }
-  
-  // เชื่อมชื่อไอเทมด้วยเครื่องหมายจุลภาค
-  return itemNames.join(', ');
 }
 
-// สร้าง bubble สำหรับ Challenge (FIRST_CHANNEL)
-function createChallengeBubble(imageUrl, itemDropsText, author) {
-  return {
-    type: "bubble",
-    hero: {
-      type: "image",
-      url: imageUrl,
-      size: "full",
-      aspectRatio: "20:13",
-      aspectMode: "cover"
-    },
-    body: {
-      type: "box",
-      layout: "vertical",
-      contents: [
-        {
-          type: "text",
-          text: "ข้อมูล Challenge",
-          weight: "bold",
-          size: "xl",
-          color: "#27ACB2"
-        },
-        {
-          type: "box",
-          layout: "vertical",
-          margin: "lg",
-          spacing: "sm",
-          contents: [
-            {
-              type: "text",
-              text: "🎁 รางวัล",
-              weight: "bold",
-              color: "#aaaaaa"
-            },
-            {
-              type: "box",
-              layout: "vertical",
-              margin: "lg",
-              contents: [
-                {
-                  type: "text",
-                  text: itemDropsText,
-                  wrap: true,
-                  size: "sm"
-                }
-              ]
-            },
-            {
-              type: "separator",
-              margin: "md"
-            },
-            {
-              type: "box",
-              layout: "baseline",
-              spacing: "sm",
-              margin: "md",
-              contents: [
-                {
-                  type: "text",
-                  text: "👤",
-                  color: "#aaaaaa",
-                  size: "sm",
-                  flex: 1
-                },
-                {
-                  type: "text",
-                  text: author,
-                  wrap: true,
-                  color: "#666666",
-                  size: "sm",
-                  flex: 5
-                }
-              ]
-            },
-            {
-              type: "box",
-              layout: "baseline",
-              spacing: "sm",
-              contents: [
-                {
-                  type: "text",
-                  text: "⏰",
-                  color: "#aaaaaa",
-                  size: "sm",
-                  flex: 1
-                },
-                {
-                  type: "text",
-                  text: new Date().toLocaleString('th-TH'),
-                  wrap: true,
-                  color: "#666666",
-                  size: "sm",
-                  flex: 5
-                }
-              ]
-            }
-          ]
-        }
-      ]
-    },
-    footer: {
-      type: "box",
-      layout: "vertical",
-      spacing: "sm",
-      contents: [
-        {
-          type: "button",
-          style: "primary",
-          height: "sm",
-          action: {
-            type: "uri",
-            label: "ดูรูปภาพ",
-            uri: imageUrl
-          },
-          color: "#27ACB2"
-        }
-      ],
-      flex: 0
-    }
-  };
-}
-
-// สร้าง bubble สำหรับ Gacha Banner (SECOND_CHANNEL)
-function createBannerBubble(imageUrl, author, isStandard) {
-  return {
-    type: "bubble",
-    hero: {
-      type: "image",
-      url: imageUrl,
-      size: "full",
-      aspectRatio: "20:13",
-      aspectMode: "cover"
-    },
-    body: {
-      type: "box",
-      layout: "vertical",
-      contents: [
-        {
-          type: "text",
-          text: isStandard ? "Standard Gacha" : "Rate-up Gacha",
-          weight: "bold",
-          size: "xl",
-          color: isStandard ? "#E32C82" : "#B600FF"
-        },
-        {
-          type: "box",
-          layout: "vertical",
-          margin: "lg",
-          spacing: "sm",
-          contents: [
-            {
-              type: "text",
-              text: "📅 Summon Banner",
-              weight: "bold",
-              color: "#aaaaaa"
-            },
-            {
-              type: "separator",
-              margin: "md"
-            },
-            {
-              type: "box",
-              layout: "baseline",
-              spacing: "sm",
-              margin: "md",
-              contents: [
-                {
-                  type: "text",
-                  text: "👤",
-                  color: "#aaaaaa",
-                  size: "sm",
-                  flex: 1
-                },
-                {
-                  type: "text",
-                  text: author,
-                  wrap: true,
-                  color: "#666666",
-                  size: "sm",
-                  flex: 5
-                }
-              ]
-            },
-            {
-              type: "box",
-              layout: "baseline",
-              spacing: "sm",
-              contents: [
-                {
-                  type: "text",
-                  text: "⏰",
-                  color: "#aaaaaa",
-                  size: "sm",
-                  flex: 1
-                },
-                {
-                  type: "text",
-                  text: new Date().toLocaleString('th-TH'),
-                  wrap: true,
-                  color: "#666666",
-                  size: "sm",
-                  flex: 5
-                }
-              ]
-            }
-          ]
-        }
-      ]
-    },
-    footer: {
-      type: "box",
-      layout: "vertical",
-      spacing: "sm",
-      contents: [
-        {
-          type: "button",
-          style: "primary",
-          height: "sm",
-          action: {
-            type: "uri",
-            label: "ดูรูปภาพ",
-            uri: imageUrl
-          },
-          color: isStandard ? "#FF6B00" : "#B600FF"
-        }
-      ],
-      flex: 0
-    }
-  };
-}
-
-// ฟังก์ชันส่ง Carousel Flex Message
-async function sendCarouselToLine() {
+// ฟังก์ชันส่งข้อความทั้งหมดที่รอส่ง
+async function sendPendingMessages() {
   try {
     // ตรวจสอบว่ามีรูปภาพที่รอส่งหรือไม่
     const challenge = pendingImages[CHANNEL_IDS.FIRST_CHANNEL];
@@ -460,75 +169,21 @@ async function sendCarouselToLine() {
       console.log('ข้อมูลเหมือนกับที่ส่งล่าสุดและยังไม่ถึงเวลาส่งใหม่ ข้ามการส่ง...');
       return;
     }
-
-    const bubbles = [];
-    let itemNamesForAltText = [];
     
-    // เพิ่ม bubble สำหรับรูปภาพ Challenge (ถ้ามี)
+    // ส่ง Challenge (ถ้ามี)
     if (challenge) {
-      const { imageUrl, itemDropsText, author } = challenge;
-      bubbles.push(createChallengeBubble(imageUrl, itemDropsText, author));
-      
-      // เก็บชื่อ item สำหรับ altText
-      const itemNames = extractItemNames(itemDropsText);
-      if (itemNames) {
-        itemNamesForAltText.push(itemNames);
-      }
-      
-      // เพิ่มรูปภาพเข้าประวัติ
-      sentImagesHistory.addImage(imageUrl);
+      await sendToDiscordChannel(challenge, true);
     }
     
-    // เพิ่ม bubble สำหรับ Standard Gacha (ถ้ามี)
+    // ส่ง Standard Gacha (ถ้ามี)
     if (standardGacha) {
-      const { imageUrl, author } = standardGacha;
-      bubbles.push(createBannerBubble(imageUrl, author, true));
-      itemNamesForAltText.push("Standard Gacha");
-      
-      // เพิ่มรูปภาพเข้าประวัติ
-      sentImagesHistory.addImage(imageUrl);
+      await sendToDiscordChannel(standardGacha, false);
     }
     
-    // เพิ่ม bubble สำหรับ Rate-up Gacha (ถ้ามี)
+    // ส่ง Rate-up Gacha (ถ้ามี)
     if (rateUpGacha) {
-      const { imageUrl, author } = rateUpGacha;
-      bubbles.push(createBannerBubble(imageUrl, author, false));
-      itemNamesForAltText.push("Rate-up Gacha");
-      
-      // เพิ่มรูปภาพเข้าประวัติ
-      sentImagesHistory.addImage(imageUrl);
+      await sendToDiscordChannel(rateUpGacha, false);
     }
-    
-    if (bubbles.length === 0) {
-      console.log('ไม่มี bubble ที่จะส่ง');
-      return;
-    }
-    
-    // สร้าง altText จากชื่อ item
-    const altText = itemNamesForAltText.join(', ').substring(0, 150); // จำกัดความยาว altText
-    
-    // สร้าง Carousel Flex Message
-    const carouselMessage = {
-      type: "flex",
-      altText: altText || "ข้อมูล Challenge และ Gacha",
-      contents: {
-        type: "carousel",
-        contents: bubbles
-      }
-    };
-
-    // ส่ง Carousel ไปยัง LINE
-    await axios.post('https://api.line.me/v2/bot/message/push', {
-      to: LINE_USER_ID,
-      messages: [carouselMessage]
-    }, {
-      headers: {
-        'Authorization': `Bearer ${LINE_TOKEN}`,
-        'Content-Type': 'application/json'
-      }
-    });
-    
-    console.log(`ส่ง Carousel Flex Message ไปยัง LINE สำเร็จ (จำนวน ${bubbles.length} รูปภาพ)`);
     
     // บันทึกสถานะล่าสุดที่ส่ง
     sentImagesHistory.saveLastSentState(challenge, standardGacha, rateUpGacha);
@@ -540,11 +195,7 @@ async function sendCarouselToLine() {
     pendingImages.lastUpdate = Date.now();
     
   } catch (error) {
-    console.error('เกิดข้อผิดพลาดในการส่ง Carousel Flex Message:', error);
-    if (error.response) {
-      console.error('Response status:', error.response.status);
-      console.error('Response data:', error.response.data);
-    }
+    console.error('เกิดข้อผิดพลาดในการส่งข้อความที่รอส่ง:', error);
   }
 }
 
@@ -553,26 +204,21 @@ async function addChallengeImage(imageUrl, author) {
   try {
     // ตรวจสอบว่าเคยส่งรูปภาพนี้ไปแล้วหรือไม่ (กันการทำงานซ้ำซ้อน)
     if (sentImagesHistory.hasImage(imageUrl)) {
-      console.log(`รูปภาพ Challenge นี้เคยส่งไปแล้ว ข้ามการวิเคราะห์: ${imageUrl}`);
+      console.log(`รูปภาพ Challenge นี้เคยส่งไปแล้ว ข้ามการประมวลผล: ${imageUrl}`);
       return;
     }
-    
-    // วิเคราะห์รูปภาพ Challenge ด้วย Gemini
-    const itemDropsText = await analyzeImageWithGemini(imageUrl);
-    console.log(`ผลการวิเคราะห์รูปภาพ Challenge:`, itemDropsText);
     
     // เก็บข้อมูลรูปภาพ
     pendingImages[CHANNEL_IDS.FIRST_CHANNEL] = {
       imageUrl,
-      itemDropsText,
       author
     };
     pendingImages.lastUpdate = Date.now();
     
     console.log(`เพิ่มรูปภาพ Challenge เข้าคิวรอส่งแล้ว`);
     
-    // ตรวจสอบว่าควรส่ง Carousel เลยหรือไม่
-    checkIfShouldSendCarousel();
+    // ตรวจสอบว่าควรส่งเลยหรือไม่
+    checkIfShouldSendMessages();
   } catch (error) {
     console.error(`เกิดข้อผิดพลาดในการเพิ่มรูปภาพ Challenge เข้าคิวรอส่ง:`, error);
   }
@@ -583,7 +229,7 @@ async function addBannerImage(imageUrl, author, isStandard) {
   try {
     // ตรวจสอบว่าเคยส่งรูปภาพนี้ไปแล้วหรือไม่ (กันการทำงานซ้ำซ้อน)
     if (sentImagesHistory.hasImage(imageUrl)) {
-      console.log(`รูปภาพ ${isStandard ? 'Standard' : 'Rate-up'} Gacha นี้เคยส่งไปแล้ว ข้าม: ${imageUrl}`);
+      console.log(`รูปภาพ ${isStandard ? 'Standard' : 'Rate-up'} Banner นี้เคยส่งไปแล้ว ข้าม: ${imageUrl}`);
       return;
     }
     
@@ -591,30 +237,31 @@ async function addBannerImage(imageUrl, author, isStandard) {
       `${CHANNEL_IDS.SECOND_CHANNEL}_standard` : 
       `${CHANNEL_IDS.SECOND_CHANNEL}_rateup`;
     
-    // เก็บข้อมูลรูปภาพ (ไม่ต้องวิเคราะห์ด้วย Gemini)
+    // เก็บข้อมูลรูปภาพ
     pendingImages[key] = {
       imageUrl,
-      author
+      author,
+      isStandard
     };
     pendingImages.lastUpdate = Date.now();
     
-    console.log(`เพิ่มรูปภาพ ${isStandard ? 'Standard' : 'Rate-up'} Gacha เข้าคิวรอส่งแล้ว`);
+    console.log(`เพิ่มรูปภาพ ${isStandard ? 'Standard' : 'Rate-up'} Banner เข้าคิวรอส่งแล้ว`);
     
-    // ตรวจสอบว่าควรส่ง Carousel เลยหรือไม่
-    checkIfShouldSendCarousel();
+    // ตรวจสอบว่าควรส่งเลยหรือไม่
+    checkIfShouldSendMessages();
   } catch (error) {
     console.error(`เกิดข้อผิดพลาดในการเพิ่มรูปภาพ Banner เข้าคิวรอส่ง:`, error);
   }
 }
 
-// ตรวจสอบว่าควรส่ง Carousel เลยหรือไม่
-function checkIfShouldSendCarousel() {
+// ตรวจสอบว่าควรส่งข้อความเลยหรือไม่
+function checkIfShouldSendMessages() {
   // ตรวจสอบว่ามีรูปภาพทั้งหมดแล้วหรือไม่ (มี Challenge + Standard Gacha + Rate-up Gacha)
   if (pendingImages[CHANNEL_IDS.FIRST_CHANNEL] && 
       pendingImages[`${CHANNEL_IDS.SECOND_CHANNEL}_standard`] && 
       pendingImages[`${CHANNEL_IDS.SECOND_CHANNEL}_rateup`]) {
-    console.log('ได้รับรูปภาพครบทั้ง 3 ประเภทแล้ว กำลังส่ง Carousel Flex Message...');
-    sendCarouselToLine();
+    console.log('ได้รับรูปภาพครบทั้ง 3 ประเภทแล้ว กำลังส่งข้อความ...');
+    sendPendingMessages();
   }
 }
 
@@ -633,8 +280,8 @@ function checkPendingQueue() {
   if (hasAtLeastOneImage && (now - pendingImages.lastUpdate >= WAIT_TIME)) {
     // ตรวจสอบว่าควรส่งหรือไม่ (กันการส่งซ้ำ)
     if (sentImagesHistory.shouldSend(challenge, standardGacha, rateUpGacha)) {
-      console.log(`รอนานกว่า ${WAIT_TIME / 120000} นาทีแล้ว กำลังส่ง Carousel Flex Message ที่มีอยู่...`);
-      sendCarouselToLine();
+      console.log(`รอนานกว่า ${WAIT_TIME / 60000} นาทีแล้ว กำลังส่งข้อความที่มีอยู่...`);
+      sendPendingMessages();
     } else {
       console.log('ข้อมูลเหมือนกับที่ส่งล่าสุดและยังไม่ถึงเวลาส่งใหม่ ล้างคิวรอส่ง...');
       // ล้างคิวเพื่อป้องกันการส่งซ้ำในรอบถัดไป
@@ -646,7 +293,7 @@ function checkPendingQueue() {
   }
 }
 
-// ฟังก์ชันดึงข้อความล่าสุดจากช่อง Challenge
+// ฟังก์ชันดึงข้อความล่าสุดจากช่อง
 async function fetchLatestMessages(channelId, limit = 5) {
   try {
     const channel = client.channels.cache.get(channelId);
@@ -722,6 +369,37 @@ client.on('ready', () => {
   
   // เริ่มตั้งเวลาตรวจสอบข้อความ
   setupMessageChecking();
+});
+
+// เมื่อมีข้อความใหม่ในช่องที่เฝ้าดู
+client.on('messageCreate', async (message) => {
+  // ตรวจสอบว่าเป็นช่องที่เฝ้าดูหรือไม่
+  if (message.channelId === CHANNEL_IDS.FIRST_CHANNEL || message.channelId === CHANNEL_IDS.SECOND_CHANNEL) {
+    // ตรวจสอบเฉพาะข้อความที่มีรูปภาพ
+    if (message.attachments.size > 0) {
+      const attachment = message.attachments.first();
+      const imageUrl = attachment.url;
+      const author = message.author.username;
+      
+      // ตรวจสอบว่าเป็นรูปภาพหรือไม่
+      if (imageUrl && (imageUrl.endsWith('.jpg') || imageUrl.endsWith('.jpeg') || imageUrl.endsWith('.png'))) {
+        console.log(`พบรูปภาพใหม่ในช่อง ${message.channelId}: ${imageUrl}`);
+        
+        // ตรวจสอบประเภทของช่อง
+        if (message.channelId === CHANNEL_IDS.FIRST_CHANNEL) {
+          // ช่อง Challenge
+          await addChallengeImage(imageUrl, author);
+        } else if (message.channelId === CHANNEL_IDS.SECOND_CHANNEL) {
+          // ตรวจสอบว่าเป็น Standard Gacha หรือ Rate-up Gacha
+          const isStandard = 
+            (attachment.name && (attachment.name.toLowerCase().includes('standard') || attachment.name.toLowerCase().includes('permanent'))) ||
+            (message.content && (message.content.toLowerCase().includes('standard') || message.content.toLowerCase().includes('permanent')));
+          
+          await addBannerImage(imageUrl, author, isStandard);
+        }
+      }
+    }
+  }
 });
 
 // สร้าง Express server เพื่อให้ Replit ไม่หลับ
