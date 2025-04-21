@@ -37,8 +37,8 @@ const config = {
     },
     
     // เพิ่ม ID role สำหรับคำสั่งพิเศษ
-    commandRoleId: '1363795020552994896',
-    challengeRoleId: '1363794959786053702'
+    bannerRoleId: '1363795020552994896',    // Role ID for banner
+    challengeRoleId: '1363794959786053702'  // Role ID for challenge
 };
 
 // ฟังก์ชั่นสำหรับแปลง role mention
@@ -74,22 +74,23 @@ function processSpecialCommands(content, sourceChannelId, destinationChannelId) 
     
     // ตรวจสอบคำสั่ง ?banner
     if (newContent.includes('?banner')) {
-        // ถ้าอยู่ในห้อง challenge ให้ใช้ role ID พิเศษ
-        if (sourceChannelId === '1332169081314476063') {
-            newContent = newContent.replace(/\?banner/g, `<@&${config.challengeRoleId}>`);
-            console.log(`พบ ?banner ในห้อง challenge แทนที่ด้วย role ID ${config.challengeRoleId}`);
+        // ถ้าอยู่ในห้อง banner ให้ใช้ role ID สำหรับ banner
+        if (sourceChannelId === '1362084541170192455') {
+            newContent = newContent.replace(/\?banner/g, `<@&${config.bannerRoleId}>`);
+            console.log(`พบ ?banner ในห้อง banner แทนที่ด้วย role ID ${config.bannerRoleId}`);
         } else {
-            newContent = newContent.replace(/\?banner/g, `<@&${config.commandRoleId}>`);
-            console.log(`พบ ?banner แทนที่ด้วย role ID ${config.commandRoleId}`);
+            // ถ้าอยู่ในห้องอื่น ใช้ bannerRoleId ด้วย (หรือกำหนด role ID เฉพาะกรณีได้)
+            newContent = newContent.replace(/\?banner/g, `<@&${config.bannerRoleId}>`);
+            console.log(`พบ ?banner แทนที่ด้วย role ID ${config.bannerRoleId}`);
         }
         hasCommand = true;
     }
     
     // ตรวจสอบคำสั่ง ?challenge
     if (newContent.includes('?challenge')) {
-        newContent = newContent.replace(/\?challenge/g, `<@&${config.commandRoleId}>`);
+        newContent = newContent.replace(/\?challenge/g, `<@&${config.challengeRoleId}>`);
         hasCommand = true;
-        console.log(`พบ ?challenge แทนที่ด้วย role ID ${config.commandRoleId}`);
+        console.log(`พบ ?challenge แทนที่ด้วย role ID ${config.challengeRoleId}`);
     }
     
     return {
@@ -219,8 +220,9 @@ client.on('ready', async () => {
     }
     
     console.log(`บอทจะจัดการคำสั่งพิเศษดังนี้:`);
-    console.log(`- ถ้าเจอ ?banner ในห้อง challenge จะแท็ก role ID ${config.challengeRoleId}`);
-    console.log(`- ถ้าเจอ ?banner ในห้องอื่นๆ หรือ ?challenge จะแท็ก role ID ${config.commandRoleId}`);
+    console.log(`- ถ้าเจอ ?banner ในห้อง banner จะแท็ก role ID ${config.bannerRoleId}`);
+    console.log(`- ถ้าเจอ ?banner ในห้องอื่นๆ จะแท็ก role ID ${config.bannerRoleId}`);
+    console.log(`- ถ้าเจอ ?challenge จะแท็ก role ID ${config.challengeRoleId}`);
     console.log(`- ลบ @บทบาท-ที่ไม่รู้จัก ออกจากข้อความในช่อง:`);
     for (const channelId of config.specialFilterChannels) {
         console.log(`  - ${channelId}`);
