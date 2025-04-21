@@ -231,12 +231,25 @@ client.on('ready', async () => {
 
 // คอยรับข้อความใหม่เท่านั้น
 client.on('messageCreate', async (message) => {
-    // ตรวจสอบข้อความในช่องปลายทางก่อน
-    if (checkDestinationMessage(message)) {
-        return; // ถ้ามีการจัดการข้อความในช่องปลายทางแล้ว ให้จบการทำงาน
+    // ตรวจสอบข้อความใหม่ในช่องเป้าหมายทันที
+    if (message.guild && message.guild.id === config.destinationServerId) {
+        // ตรวจสอบว่าเป็นช่องที่ต้องการกรองหรือไม่
+        if (message.channel.id === '1363809293287293070' || message.channel.id === '1363789018327945276') {
+            // ตรวจสอบว่ามีข้อความ "@บทบาท-ที่ไม่รู้จัก" หรือไม่
+            if (message.content && message.content.includes('@บทบาท-ที่ไม่รู้จัก')) {
+                try {
+                    console.log(`พบ @บทบาท-ที่ไม่รู้จัก ในช่อง ${message.channel.id} กำลังลบข้อความใหม่...`);
+                    await message.delete();
+                    console.log(`ลบข้อความใหม่สำเร็จ!`);
+                    return; // จบการทำงานหลังจากลบข้อความ
+                } catch (error) {
+                    console.error(`ไม่สามารถลบข้อความใหม่ได้: ${error.message}`);
+                }
+            }
+        }
     }
     
-    // ตรวจสอบว่าเป็นข้อความจากช่องและเซิร์ฟเวอร์ที่ต้องการหรือไม่
+    // ดำเนินการกับข้อความส่งต่อตามปกติ
     if (message.guild && message.guild.id === config.sourceServerId) {
         const destChannelId = config.channels[message.channel.id];
         
